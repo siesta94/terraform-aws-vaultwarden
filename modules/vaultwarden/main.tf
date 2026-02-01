@@ -1,5 +1,3 @@
-# modules/vpc/main.tf
-
 resource "aws_vpc" "this" {
   count             = var.create_vpc ? 1 : 0
   cidr_block        = var.vpc_cidr
@@ -103,7 +101,39 @@ resource "aws_route_table_association" "this_private" {
   route_table_id = aws_route_table.this_private[0].id
 }
 
+# ECS Cluster
+resource "aws_ecs_cluster" "this" {
+  count = var.create_cluster ? 1 : 0
+  name  = "${var.cluster_name}-${var.environment}"
+
+  tags = merge(
+    {
+      Name        = "${var.cluster_name}-${var.environment}"
+      Environment = var.environment
+      Terraform   = "true"
+    },
+    var.tags
+  )
+}
+
+# CloudWatch Log Group for ECS
+resource "aws_cloudwatch_log_group" "this" {
+  count             = var.create_cluster ? 1 : 0
+  name              = "/ecs/${var.cluster_name}-${var.environment}"
+  retention_in_days = 30
+
+  tags = merge(
+    {
+      Name        = "${var.cluster_name}-logs"
+      Environment = var.environment
+      Terraform   = "true"
+    },
+    var.tags
+  )
+}
+
 # Output the vpc id, either created or from input
 locals {
-  vpc_id = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
+  vpc_id      = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
+  cluster_arn = var.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
 }

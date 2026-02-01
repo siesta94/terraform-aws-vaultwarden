@@ -1,4 +1,4 @@
-# modules/vpc/variables.tf
+# modules/vaultwarden/variables.tf
 
 variable "create_vpc" {
   description = "Whether to create a new VPC"
@@ -46,4 +46,22 @@ variable "environment" {
   description = "Environment tag (e.g. dev, prod)"
   type        = string
   default     = "dev"
+}
+
+variable "create_cluster" {
+  description = "Whether to create a new ECS cluster"
+  type        = bool
+  default     = true
+}
+
+variable "cluster_arn" {
+  description = "Existing ECS cluster ARN, used when create_cluster is false"
+  type        = string
+  default     = null
+}
+
+variable "cluster_name" {
+  description = "Name prefix for ECS cluster to create"
+  type        = string
+  default     = "vaultwarden-cluster"
 }

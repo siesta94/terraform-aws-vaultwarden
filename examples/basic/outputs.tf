@@ -1,4 +1,4 @@
 # Outputs
 output "vpc_id" {
-  value = module.vpc.vpc_id
+  value = module.vaultwarden.vpc_id
 }
