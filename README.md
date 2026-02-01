@@ -20,21 +20,44 @@ It is designed for flexibility — you can integrate it with your current VPC or
 
 ## Example Usage
 
+You can deploy Vaultwarden either in an existing VPC and ECS cluster or let the module create completely new ones.
+
 ```hcl
 module "vaultwarden" {
-  source     = "github.com/siesta94/terraform-aws-vaultwarden"
-  create_vpc = true
+  source         = "github.com/siesta94/terraform-aws-vaultwarden"
 
-  vpc_cidr        = "10.1.0.0/16"
-  vpc_name        = "vaultwarden-example-vpc"
+  # Toggle VPC creation (set false to use existing VPC)
+  create_vpc     = true
+  vpc_id         = null
+  vpc_cidr       = "10.1.0.0/16"
+  vpc_name       = "vaultwarden-example-vpc"
+
+  # Toggle ECS cluster creation (set false to use existing cluster)
+  create_cluster = true
+  cluster_arn    = null
+  cluster_name   = "vaultwarden-example"
+
+  # Subnet definitions
   public_subnets  = ["10.1.1.0/24", "10.1.2.0/24"]
   private_subnets = ["10.1.11.0/24", "10.1.12.0/24"]
 
   environment = "example"
+  tags = {
+    Project     = "vaultwarden"
+    Environment = "example"
+  }
+}
+
+output "vpc_id" {
+  value = module.vaultwarden.vpc_id
+}
+
+output "ecs_cluster_arn" {
+  value = module.vaultwarden.ecs_cluster_arn
 }
 ```
 
-This example creates a new VPC, subnets, and all necessary resources to deploy Vaultwarden in AWS ECS.
+This configuration demonstrates full flexibility — users can spin up both networking and ECS layers or integrate Vaultwarden directly with existing AWS infrastructure.
 
 ---
 
