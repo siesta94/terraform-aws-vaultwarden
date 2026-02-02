@@ -134,6 +134,8 @@ resource "aws_cloudwatch_log_group" "this" {
 
 # Output the vpc id, either created or from input
 locals {
-  vpc_id      = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
-  cluster_arn = var.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
+  vpc_id          = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
+  public_subnets  = var.create_vpc ? aws_subnet.this_public[*].id : var.public_subnet_ids
+  private_subnets = var.create_vpc ? aws_subnet.this_private[*].id : var.private_subnet_ids
+  cluster_arn     = var.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
 }

@@ -65,3 +65,15 @@ variable "cluster_name" {
   type        = string
   default     = "vaultwarden-cluster"
 }
+
+variable "public_subnet_ids" {
+  description = "List of existing public subnet IDs (used when create_vpc = false)"
+  type        = list(string)
+  default     = []
+}
+
+variable "private_subnet_ids" {
+  description = "List of existing private subnet IDs (used when create_vpc = false)"
+  type        = list(string)
+  default     = []
+}
