@@ -17,7 +17,7 @@ module "vaultwarden" {
   db_max_storage_gb  = 100
   db_multi_az        = false
   db_username        = "vaultwarden"
-  db_password        = "SuperSecurePassword123!"
+  db_password        = var.vaultwarden_user_password
 
   tags = {
     Project     = "vaultwarden"

@@ -160,7 +160,7 @@ resource "aws_db_subnet_group" "this" {
 resource "aws_db_instance" "this" {
   identifier              = "${var.vpc_name}-postgres"
   engine                  = "postgres"
-  engine_version          = "15.3"
+  engine_version          = "18"
   instance_class          = var.db_instance_type
   allocated_storage       = var.db_storage_gb
   max_allocated_storage   = var.db_max_storage_gb
