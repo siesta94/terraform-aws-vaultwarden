@@ -139,3 +139,76 @@ locals {
   private_subnets = var.create_vpc ? aws_subnet.this_private[*].id : var.private_subnet_ids
   cluster_arn     = var.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
 }
+
+# ------------------------------
+# RDS: PostgreSQL Database (Mandatory)
+# ------------------------------
+
+resource "aws_db_subnet_group" "this" {
+  name       = "${var.vpc_name}-db-subnet-group"
+  subnet_ids = local.private_subnets
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-db-subnet-group"
+      Environment = var.environment
+    },
+    var.tags
+  )
+}
+
+resource "aws_db_instance" "this" {
+  identifier              = "${var.vpc_name}-postgres"
+  engine                  = "postgres"
+  engine_version          = "15.3"
+  instance_class          = var.db_instance_type
+  allocated_storage       = var.db_storage_gb
+  max_allocated_storage   = var.db_max_storage_gb
+  publicly_accessible     = false
+  storage_encrypted       = true
+  deletion_protection     = true
+  multi_az                = var.db_multi_az
+  db_subnet_group_name    = aws_db_subnet_group.this.name
+  vpc_security_group_ids  = [aws_security_group.db_sg.id]
+  username                = var.db_username
+  password                = var.db_password
+  skip_final_snapshot     = true
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-db"
+      Environment = var.environment
+      Terraform   = "true"
+    },
+    var.tags
+  )
+}
+
+resource "aws_security_group" "db_sg" {
+  name        = "${var.vpc_name}-db-sg"
+  description = "Allow access from ECS tasks to PostgreSQL"
+  vpc_id      = local.vpc_id
+
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [for cidr in var.private_subnets : cidr]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-db-sg"
+      Environment = var.environment
+      Terraform   = "true"
+    },
+    var.tags
+  )
+}

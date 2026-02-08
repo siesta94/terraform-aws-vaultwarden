@@ -77,3 +77,43 @@ variable "private_subnet_ids" {
   type        = list(string)
   default     = []
 }
+
+# ------------------------------
+# RDS PostgreSQL Variables
+# ------------------------------
+
+variable "db_instance_type" {
+  description = "The instance type for the RDS PostgreSQL database"
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_storage_gb" {
+  description = "The initial storage size for the RDS database (in GB)"
+  type        = number
+  default     = 20
+}
+
+variable "db_max_storage_gb" {
+  description = "The maximum storage size for the RDS database (in GB)"
+  type        = number
+  default     = 20
+}
+
+variable "db_multi_az" {
+  description = "Whether to enable Multi-AZ deployment for RDS"
+  type        = bool
+  default     = false
+}
+
+variable "db_username" {
+  description = "The master username for the RDS PostgreSQL database"
+  type        = string
+  default     = "vaultwarden"
+}
+
+variable "db_password" {
+  description = "The master password for the RDS PostgreSQL database"
+  type        = string
+  sensitive   = true
+}
