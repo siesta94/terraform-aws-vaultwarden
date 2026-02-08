@@ -171,17 +171,15 @@ resource "aws_db_instance" "this" {
   db_subnet_group_name    = aws_db_subnet_group.this.name
   vpc_security_group_ids  = [aws_security_group.db_sg.id]
   username                = var.db_username
-  password                = var.db_password
+  password                = random_password.db.result
   skip_final_snapshot     = true
+}
 
-  tags = merge(
-    {
-      Name        = "${var.vpc_name}-db"
-      Environment = var.environment
-      Terraform   = "true"
-    },
-    var.tags
-  )
+# Generate secure random DB password
+resource "random_password" "db" {
+  length  = 20
+  special = true
+  override_special = "_%@"
 }
 
 resource "aws_security_group" "db_sg" {
