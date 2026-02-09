@@ -1,0 +1,39 @@
+# Terraform standard .gitignore
+
+# Local .terraform directories
+**/.terraform/*
+**/.terraform/**
+.terraform.tfstate*
+
+# Terraform state files
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+*.tfstate.backup
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Exclude lock files and local overrides
+.terraform.lock.hcl
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Sensitive variable files
+terraform.tfvars
+*.auto.tfvars
+*.tfvars.json
+*.tfplan
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+# Editor and OS files
+.DS_Store
+*.swp
+*.bak
+Thumbs.db

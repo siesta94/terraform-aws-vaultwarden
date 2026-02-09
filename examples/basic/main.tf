@@ -1,5 +1,22 @@
 # Example usage of the Vaultwarden module
 
+terraform {
+  required_providers {
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 6.0"
+    }
+  }
+}
+
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
+}
+
 module "vaultwarden" {
   source           = "../../modules/vaultwarden"
   create_vpc       = true
@@ -17,7 +34,13 @@ module "vaultwarden" {
   db_max_storage_gb  = 100
   db_multi_az        = false
   db_username        = "vaultwarden"
-  db_password        = var.vaultwarden_user_password
+  rds_secret_name    = "vaultwarden-db-password"
+
+  # Domain and SSL Configuration
+  domain_name         = "example.aioc-services.com"
+  domain_provider     = "cloudflare" # or "cloudflare"
+  acm_certificate_arn = ""        # leave empty for new ACM cert creation
+  cloudflare_zone_id = var.cloudflare_zone_id
 
   tags = {
     Project     = "vaultwarden"

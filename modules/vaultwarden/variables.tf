@@ -112,8 +112,59 @@ variable "db_username" {
   default     = "vaultwarden"
 }
 
-variable "db_password" {
-  description = "The master password for the RDS PostgreSQL database"
+# db_password variable is no longer needed since the password is generated and stored automatically in Secrets Manager
+# Instead, users can override the secret name if desired
+variable "rds_secret_name" {
+  description = "Optional custom name for the Secrets Manager secret storing the RDS password"
   type        = string
+  default     = null
+}
+
+# ------------------------------
+# ALB and ACM Variables
+# ------------------------------
+
+variable "domain_provider" {
+  description = "DNS provider for domain configuration base (cloudflare or route53)"
+  type        = string
+  default     = "route53"
+  validation {
+    condition     = contains(["route53", "cloudflare"], var.domain_provider)
+    error_message = "domain_provider must be either 'route53' or 'cloudflare'"
+  }
+}
+
+variable "domain_name" {
+  description = "Primary domain name for Vaultwarden (e.g. vaultwarden.example.com)"
+  type        = string
+  default     = ""
+}
+
+variable "acm_certificate_arn" {
+  description = "Existing ACM certificate ARN for HTTPS access (optional)"
+  type        = string
+  default     = ""
+}
+
+# ------------------------------
+# Cloudflare Connection Variables
+# ------------------------------
+
+variable "cloudflare_api_token" {
+  description = "API token for Cloudflare with DNS edit access (required if domain_provider = 'cloudflare')"
+  type        = string
+  default     = ""
   sensitive   = true
+}
+
+variable "cloudflare_zone_id" {
+  description = "Zone ID of the Cloudflare domain (required if domain_provider = 'cloudflare')"
+  type        = string
+  default     = ""
+}
+
+variable "cloudflare_record_ttl" {
+  description = "TTL for DNS records managed under Cloudflare"
+  type        = number
+  default     = 3600
 }
