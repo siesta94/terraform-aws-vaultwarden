@@ -425,6 +425,194 @@ resource "aws_cloudwatch_log_group" "this" {
   )
 }
 
+# ------------------------------
+# ECS Task Definition & Service
+# ------------------------------
+
+resource "aws_iam_role" "ecs_task_execution" {
+  name = "${var.vpc_name}-ecs-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_secrets_access" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_efs_access" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonElasticFileSystemClientFullAccess"
+}
+
+resource "aws_ecs_task_definition" "vaultwarden" {
+  family                   = "vaultwarden"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = 512
+  memory                   = 1024
+  execution_role_arn       = aws_iam_role.ecs_task_execution.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "init-db"
+      image     = "postgres:18"
+      essential = false
+      command   = [
+        "sh",
+        "-c",
+        "PGPASSWORD=${random_password.db.result} psql -h ${aws_db_instance.this.address} -U ${var.db_username} -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname = 'vaultwarden';\" | grep -q 1 || psql -h ${aws_db_instance.this.address} -U ${var.db_username} -d postgres -c 'CREATE DATABASE vaultwarden;'"
+      ]
+      environment = [
+        {
+          name  = "PGPASSWORD"
+          value = random_password.db.result
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.this[0].name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "vaultwarden-init"
+        }
+      }
+    },
+    {
+      name      = "vaultwarden"
+      image     = "vaultwarden/server:${var.vaultwarden_image_tag}"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 80
+          hostPort      = 80
+          protocol      = "tcp"
+        }
+      ]
+      environment = concat([
+        {
+          name  = "ROCKET_PORT"
+          value = "80"
+        },
+        {
+          name  = "DATABASE_URL"
+          value = "postgres://${var.db_username}:${random_password.db.result}@${aws_db_instance.this.address}:5432/vaultwarden"
+        }
+      ], [
+        for key, value in var.vaultwarden_extra_env : {
+          name  = key
+          value = value
+        }
+      ])
+      mountPoints = [
+        {
+          sourceVolume  = "vaultwarden-data"
+          containerPath = "/data"
+          readOnly      = false
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.this[0].name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "vaultwarden"
+        }
+      }
+    }
+  ])
+
+  volume {
+    name = "vaultwarden-data"
+    efs_volume_configuration {
+      file_system_id          = aws_efs_file_system.vaultwarden.id
+      transit_encryption      = "ENABLED"
+      authorization_config {
+        access_point_id = null
+        iam             = "DISABLED"
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_lb_target_group" "vaultwarden" {
+  name        = "${var.vpc_name}-tg"
+  port        = 80
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = local.vpc_id
+  health_check {
+    path                = "/"
+    interval            = 60
+    timeout             = 15
+    unhealthy_threshold = 2
+    healthy_threshold   = 2
+    matcher             = "200-399"
+  }
+
+  tags = var.tags
+}
+
+resource "aws_lb_listener_rule" "vaultwarden_forward" {
+  listener_arn = aws_lb_listener.https.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.vaultwarden.arn
+  }
+
+  condition {
+    host_header {
+      values = [var.domain_name]
+    }
+  }
+}
+
+resource "aws_ecs_service" "vaultwarden" {
+  name            = "vaultwarden"
+  cluster         = local.cluster_arn
+  task_definition = aws_ecs_task_definition.vaultwarden.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = local.private_subnets
+    assign_public_ip = false
+    security_groups  = [aws_security_group.ecs_service.id]
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.vaultwarden.arn
+    container_name   = "vaultwarden"
+    container_port   = 80
+  }
+
+  depends_on = [
+    aws_lb_listener_rule.vaultwarden_forward
+  ]
+
+  tags = var.tags
+}
+
 # Output the vpc id, either created or from input
 locals {
   vpc_id          = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
@@ -485,6 +673,37 @@ resource "random_password" "db" {
   override_special = "_%@"
 }
 
+# Dedicated security group for ECS service
+resource "aws_security_group" "ecs_service" {
+  name        = "${var.vpc_name}-ecs-sg"
+  description = "Allow inbound HTTP from ALB and full egress"
+  vpc_id      = local.vpc_id
+
+  ingress {
+    description     = "Allow ALB to reach ECS tasks on port 80"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-ecs-sg"
+      Environment = var.environment
+      Terraform   = "true"
+    },
+    var.tags
+  )
+}
+
 resource "aws_security_group" "db_sg" {
   name        = "${var.vpc_name}-db-sg"
   description = "Allow access from ECS tasks to PostgreSQL"
@@ -495,6 +714,14 @@ resource "aws_security_group" "db_sg" {
     to_port     = 5432
     protocol    = "tcp"
     cidr_blocks = [for cidr in var.private_subnets : cidr]
+  }
+
+  # Allow NFS traffic for ECS tasks to mount EFS volumes
+  ingress {
+    from_port   = 2049
+    to_port     = 2049
+    protocol    = "tcp"
+    self        = true
   }
 
   egress {

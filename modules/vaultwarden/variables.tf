@@ -134,6 +134,12 @@ variable "domain_provider" {
   }
 }
 
+variable "aws_region" {
+  description = "AWS region used for all resources like CloudWatch logs, ECS, and networking"
+  type        = string
+  default     = "us-east-1"
+}
+
 variable "domain_name" {
   description = "Primary domain name for Vaultwarden (e.g. vaultwarden.example.com)"
   type        = string
@@ -167,4 +173,20 @@ variable "cloudflare_record_ttl" {
   description = "TTL for DNS records managed under Cloudflare"
   type        = number
   default     = 3600
+}
+
+# ------------------------------
+# Vaultwarden Application Variables
+# ------------------------------
+
+variable "vaultwarden_image_tag" {
+  description = "Tag of the Vaultwarden Docker image to deploy (e.g. '1.30.5')"
+  type        = string
+  default     = "latest"
+}
+
+variable "vaultwarden_extra_env" {
+  description = "Map of additional environment variables for Vaultwarden (e.g. SMTP, DOMAIN, etc.)"
+  type        = map(string)
+  default     = {}
 }

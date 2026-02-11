@@ -1,16 +1,24 @@
-# Example usage of the Vaultwarden module
+# examples/basic/main.tf
+#
+# Fully parameterized example calling the Vaultwarden module
 
 terraform {
+  required_version = ">= 1.6.0"
+
   required_providers {
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "~> 4.0"
-    }
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
   }
+}
+
+provider "aws" {
+  region = var.aws_region
 }
 
 provider "cloudflare" {
@@ -18,32 +26,41 @@ provider "cloudflare" {
 }
 
 module "vaultwarden" {
-  source           = "../../modules/vaultwarden"
-  create_vpc       = true
-  create_cluster   = true
-  vpc_cidr         = "10.1.0.0/16"
-  vpc_name         = "vaultwarden-example-vpc"
-  environment      = "example" # Use something like "prod"
+  source = "../../modules/vaultwarden"
 
-  public_subnets   = ["10.1.1.0/24", "10.1.2.0/24"]
-  private_subnets  = ["10.1.11.0/24", "10.1.12.0/24"]
+  # General configuration
+  aws_region  = var.aws_region
+  environment = var.environment
+  tags        = var.tags
 
-  # RDS Configuration
-  db_instance_type   = "db.t4g.micro"
-  db_storage_gb      = 20
-  db_max_storage_gb  = 100
-  db_multi_az        = false
-  db_username        = "vaultwarden"
-  rds_secret_name    = "vaultwarden-db-password"
+  # Networking
+  create_vpc      = var.create_vpc
+  vpc_cidr        = var.vpc_cidr
+  vpc_name        = var.vpc_name
+  public_subnets  = var.public_subnets
+  private_subnets = var.private_subnets
 
-  # Domain and SSL Configuration
-  domain_name         = "example.aioc-services.com"
-  domain_provider     = "cloudflare" # or "cloudflare"
-  acm_certificate_arn = ""        # leave empty for new ACM cert creation
-  cloudflare_zone_id = var.cloudflare_zone_id
+  # ECS cluster
+  create_cluster = var.create_cluster
+  cluster_name   = var.cluster_name
 
-  tags = {
-    Project     = "vaultwarden"
-    Environment = "example"
-  }
+  # Database
+  db_instance_type   = var.db_instance_type
+  db_storage_gb      = var.db_storage_gb
+  db_max_storage_gb  = var.db_max_storage_gb
+  db_multi_az        = var.db_multi_az
+  db_username        = var.db_username
+  rds_secret_name    = var.rds_secret_name
+
+  # Domain and certificates
+  domain_name          = var.domain_name
+  domain_provider      = var.domain_provider
+  acm_certificate_arn  = var.acm_certificate_arn
+  cloudflare_zone_id   = var.cloudflare_zone_id
+  cloudflare_record_ttl = var.cloudflare_record_ttl
+  cloudflare_api_token = var.cloudflare_api_token
+
+  # Vaultwarden application configuration
+  vaultwarden_image_tag = var.vaultwarden_image_tag
+  vaultwarden_extra_env = var.vaultwarden_extra_env
 }
