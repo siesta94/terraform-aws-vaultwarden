@@ -119,18 +119,12 @@ resource "aws_route53_record" "acm_validation" {
 
 # Cloudflare Validation Record
 resource "cloudflare_record" "acm_validation" {
-  for_each = var.domain_provider == "cloudflare" && var.acm_certificate_arn == "" ? {
-    for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_name => {
-      name  = dvo.resource_record_name
-      type  = dvo.resource_record_type
-      value = dvo.resource_record_value
-    }
-  } : {}
+  count = var.domain_provider == "cloudflare" && var.acm_certificate_arn == "" ? 1 : 0
 
   zone_id = var.cloudflare_zone_id
-  name    = each.value.name
-  type    = each.value.type
-  content = each.value.value
+  name    = try([for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_name][0], null)
+  type    = try([for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_type][0], "CNAME")
+  content = try([for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_value][0], null)
   ttl     = var.cloudflare_record_ttl
   proxied = false
 
@@ -147,6 +141,101 @@ resource "aws_acm_certificate_validation" "this" {
     [for record in aws_route53_record.acm_validation : record.fqdn] :
     [for record in cloudflare_record.acm_validation : record.name]
   )
+}
+
+# ------------------------------
+# EFS Storage and Backup
+# ------------------------------
+
+resource "aws_efs_file_system" "vaultwarden" {
+  creation_token = "${var.vpc_name}-efs"
+  encrypted      = true
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-efs"
+      Environment = var.environment
+    },
+    var.tags
+  )
+}
+
+resource "aws_efs_mount_target" "vaultwarden" {
+  count          = length(local.private_subnets)
+  file_system_id = aws_efs_file_system.vaultwarden.id
+  subnet_id      = local.private_subnets[count.index]
+  security_groups = [aws_security_group.db_sg.id] # reuse for private subnet access
+}
+
+# Backup vault and plan for EFS
+resource "aws_backup_vault" "vaultwarden" {
+  name        = "${var.vpc_name}-efs-backup-vault"
+  kms_key_arn = null
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-efs-backup-vault"
+      Environment = var.environment
+    },
+    var.tags
+  )
+}
+
+resource "aws_backup_plan" "vaultwarden" {
+  name = "${var.vpc_name}-efs-backup-plan"
+
+  rule {
+    rule_name         = "vaultwarden-efs-daily"
+    target_vault_name = aws_backup_vault.vaultwarden.name
+    schedule          = "cron(0 5 * * ? *)" # daily at 05:00 UTC
+    lifecycle {
+      delete_after = 30
+    }
+  }
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-efs-backup-plan"
+      Environment = var.environment
+    },
+    var.tags
+  )
+}
+
+resource "aws_backup_selection" "vaultwarden" {
+  iam_role_arn = aws_iam_role.backup.arn
+  name         = "vaultwarden-efs-selection"
+  plan_id      = aws_backup_plan.vaultwarden.id
+
+  resources = [
+    aws_efs_file_system.vaultwarden.arn
+  ]
+}
+
+resource "aws_iam_role" "backup" {
+  name = "${var.vpc_name}-efs-backup-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "backup.amazonaws.com"
+      }
+    }]
+  })
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-efs-backup-role"
+      Environment = var.environment
+    },
+    var.tags
+  )
+}
+
+resource "aws_iam_role_policy_attachment" "backup_policy" {
+  role       = aws_iam_role.backup.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSBackupServiceRolePolicyForBackup"
 }
 
 # ------------------------------
