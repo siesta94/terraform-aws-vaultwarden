@@ -163,7 +163,8 @@ resource "aws_efs_mount_target" "vaultwarden" {
   count          = length(local.private_subnets)
   file_system_id = aws_efs_file_system.vaultwarden.id
   subnet_id      = local.private_subnets[count.index]
-  security_groups = [aws_security_group.db_sg.id] # reuse for private subnet access
+  # Use a dedicated EFS security group so ECS tasks can reach NFS
+  security_groups = [aws_security_group.efs_sg.id]
 }
 
 # Backup vault and plan for EFS
@@ -500,15 +501,15 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       essential = true
       portMappings = [
         {
-          containerPort = 80
-          hostPort      = 80
+          containerPort = 8080
+          hostPort      = 8080
           protocol      = "tcp"
         }
       ]
       environment = concat([
         {
           name  = "ROCKET_PORT"
-          value = "80"
+          value = "8080"
         },
         {
           name  = "DATABASE_URL"
@@ -555,16 +556,16 @@ resource "aws_ecs_task_definition" "vaultwarden" {
 
 resource "aws_lb_target_group" "vaultwarden" {
   name        = "${var.vpc_name}-tg"
-  port        = 80
+  port        = 8080
   protocol    = "HTTP"
   target_type = "ip"
   vpc_id      = local.vpc_id
   health_check {
     path                = "/"
-    interval            = 60
-    timeout             = 15
-    unhealthy_threshold = 2
-    healthy_threshold   = 2
+    interval            = 45
+    timeout             = 10
+    unhealthy_threshold = 5
+    healthy_threshold   = 3
     matcher             = "200-399"
   }
 
@@ -603,7 +604,7 @@ resource "aws_ecs_service" "vaultwarden" {
   load_balancer {
     target_group_arn = aws_lb_target_group.vaultwarden.arn
     container_name   = "vaultwarden"
-    container_port   = 80
+    container_port   = 8080
   }
 
   depends_on = [
@@ -681,8 +682,8 @@ resource "aws_security_group" "ecs_service" {
 
   ingress {
     description     = "Allow ALB to reach ECS tasks on port 80"
-    from_port       = 80
-    to_port         = 80
+    from_port       = 8080
+    to_port         = 8080
     protocol        = "tcp"
     security_groups = [aws_security_group.alb_sg.id]
   }
@@ -716,12 +717,34 @@ resource "aws_security_group" "db_sg" {
     cidr_blocks = [for cidr in var.private_subnets : cidr]
   }
 
-  # Allow NFS traffic for ECS tasks to mount EFS volumes
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(
+    {
+      Name        = "${var.vpc_name}-db-sg"
+      Environment = var.environment
+      Terraform   = "true"
+      Terraform   = "true"
+    },
+    var.tags
+  )
+}
+
+resource "aws_security_group" "efs_sg" {
+  name        = "${var.vpc_name}-efs-sg"
+  description = "Allow NFS traffic from ECS tasks to EFS"
+  vpc_id      = local.vpc_id
+
   ingress {
-    from_port   = 2049
-    to_port     = 2049
-    protocol    = "tcp"
-    self        = true
+    from_port       = 2049
+    to_port         = 2049
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs_service.id]
   }
 
   egress {
@@ -733,7 +756,7 @@ resource "aws_security_group" "db_sg" {
 
   tags = merge(
     {
-      Name        = "${var.vpc_name}-db-sg"
+      Name        = "${var.vpc_name}-efs-sg"
       Environment = var.environment
       Terraform   = "true"
     },

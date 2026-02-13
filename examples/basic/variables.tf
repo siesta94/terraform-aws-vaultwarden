@@ -114,7 +114,7 @@ variable "domain_provider" {
 variable "domain_name" {
   description = "Primary FQDN for Vaultwarden access"
   type        = string
-  default     = "vaultwarden.aioc-services.com"
+  default     = "new-instance-1.aioc-services.com"
 }
 
 variable "acm_certificate_arn" {
@@ -147,7 +147,7 @@ variable "cloudflare_record_ttl" {
 variable "vaultwarden_image_tag" {
   description = "Vaultwarden image tag (version pin)"
   type        = string
-  default     = "1.30.5"
+  default     = "1.34.3"
 }
 
 variable "vaultwarden_extra_env" {
