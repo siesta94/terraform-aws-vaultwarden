@@ -67,6 +67,31 @@ variable "cluster_name" {
   default     = "vaultwarden-cluster"
 }
 
+variable "cluster_arn" {
+  description = "Existing ECS cluster ARN (required when create_cluster is false)"
+  type        = string
+  default     = null
+}
+
+variable "log_group_name" {
+  description = "Existing CloudWatch log group name (required when create_cluster is false)"
+  type        = string
+  default     = null
+}
+
+# ALB
+variable "alb_enable_deletion_protection" {
+  description = "Enable ALB deletion protection"
+  type        = bool
+  default     = false
+}
+
+variable "alb_ssl_policy" {
+  description = "SSL policy for the HTTPS listener"
+  type        = string
+  default     = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+}
+
 # Database
 variable "db_instance_type" {
   description = "Instance type for RDS PostgreSQL"
@@ -98,6 +123,24 @@ variable "db_username" {
   default     = "vaultwarden"
 }
 
+variable "db_skip_final_snapshot" {
+  description = "Skip final RDS snapshot on destroy"
+  type        = bool
+  default     = true
+}
+
+variable "db_backup_retention_period" {
+  description = "RDS automated backup retention in days (0 to disable)"
+  type        = number
+  default     = 7
+}
+
+variable "db_backup_window" {
+  description = "Daily time range for RDS backups (UTC)"
+  type        = string
+  default     = "03:00-04:00"
+}
+
 variable "rds_secret_name" {
   description = "Optional name for Secrets Manager password entry"
   type        = string
@@ -114,7 +157,19 @@ variable "domain_provider" {
 variable "domain_name" {
   description = "Primary FQDN for Vaultwarden access"
   type        = string
-  default     = "new-instance-1.aioc-services.com"
+  default     = "new-instance-4.aioc-services.com"
+}
+
+variable "route53_zone_id" {
+  description = "Existing Route53 hosted zone ID (optional; use for existing cert or multi-level TLDs)"
+  type        = string
+  default     = null
+}
+
+variable "route53_zone_name" {
+  description = "Route53 zone name for lookup when zone_id not set (e.g. example.co.uk)"
+  type        = string
+  default     = null
 }
 
 variable "acm_certificate_arn" {

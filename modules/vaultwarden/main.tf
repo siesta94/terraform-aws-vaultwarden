@@ -8,6 +8,10 @@ terraform {
       source  = "cloudflare/cloudflare"
       version = "~> 4.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 }
 
@@ -35,7 +39,7 @@ resource "aws_lb" "this" {
   security_groups    = [aws_security_group.alb_sg.id]
   subnets            = local.public_subnets
 
-  enable_deletion_protection = false
+  enable_deletion_protection = var.alb_enable_deletion_protection
 
   tags = merge(
     {
@@ -100,31 +104,33 @@ resource "aws_acm_certificate" "this" {
 # DNS Validation for ACM
 # ------------------------------
 
-# Route53 zone lookup for ACM validation (only used if domain_provider = "route53")
+# Route53 zone lookup (when domain_provider = "route53" and zone ID not provided)
 data "aws_route53_zone" "selected" {
-  count = var.domain_provider == "route53" && var.acm_certificate_arn == "" ? 1 : 0
-  name  = regex("(.*\\.)?([^\\.]+\\.[^\\.]+)$", var.domain_name)[0]
-  private_zone = false
+  count         = var.domain_provider == "route53" && (var.route53_zone_id == null || var.route53_zone_id == "") ? 1 : 0
+  name          = coalesce(var.route53_zone_name, regex("(.*\\.)?([^\\.]+\\.[^\\.]+)$", var.domain_name)[0])
+  private_zone  = false
 }
 
-# Route53 Validation Record
+# Route53 Validation Record (one per ACM domain_validation_options)
+# domain_validation_options is a set; tolist() allows indexing by count.index
 resource "aws_route53_record" "acm_validation" {
   count   = var.domain_provider == "route53" && var.acm_certificate_arn == "" ? length(aws_acm_certificate.this[0].domain_validation_options) : 0
-  zone_id = data.aws_route53_zone.selected[0].zone_id
-  name    = aws_acm_certificate.this[0].domain_validation_options[count.index].resource_record_name
-  type    = aws_acm_certificate.this[0].domain_validation_options[count.index].resource_record_type
-  records = [aws_acm_certificate.this[0].domain_validation_options[count.index].resource_record_value]
+  zone_id = local.route53_zone_id
+  name    = tolist(aws_acm_certificate.this[0].domain_validation_options)[count.index].resource_record_name
+  type    = tolist(aws_acm_certificate.this[0].domain_validation_options)[count.index].resource_record_type
+  records = [tolist(aws_acm_certificate.this[0].domain_validation_options)[count.index].resource_record_value]
   ttl     = 60
 }
 
-# Cloudflare Validation Record
+# Cloudflare Validation Records (one per ACM domain_validation_options)
+# domain_validation_options is a set; tolist() allows indexing by count.index
 resource "cloudflare_record" "acm_validation" {
-  count = var.domain_provider == "cloudflare" && var.acm_certificate_arn == "" ? 1 : 0
+  count = var.domain_provider == "cloudflare" && var.acm_certificate_arn == "" ? length(aws_acm_certificate.this[0].domain_validation_options) : 0
 
   zone_id = var.cloudflare_zone_id
-  name    = try([for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_name][0], null)
-  type    = try([for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_type][0], "CNAME")
-  content = try([for dvo in aws_acm_certificate.this[0].domain_validation_options : dvo.resource_record_value][0], null)
+  name    = tolist(aws_acm_certificate.this[0].domain_validation_options)[count.index].resource_record_name
+  type    = tolist(aws_acm_certificate.this[0].domain_validation_options)[count.index].resource_record_type
+  content = tolist(aws_acm_certificate.this[0].domain_validation_options)[count.index].resource_record_value
   ttl     = var.cloudflare_record_ttl
   proxied = false
 
@@ -134,8 +140,8 @@ resource "cloudflare_record" "acm_validation" {
 }
 
 resource "aws_acm_certificate_validation" "this" {
-  count                = var.acm_certificate_arn == "" ? 1 : 0
-  certificate_arn      = aws_acm_certificate.this[0].arn
+  count                   = var.acm_certificate_arn == "" ? 1 : 0
+  certificate_arn         = aws_acm_certificate.this[0].arn
   validation_record_fqdns = (
     var.domain_provider == "route53" ?
     [for record in aws_route53_record.acm_validation : record.fqdn] :
@@ -240,15 +246,15 @@ resource "aws_iam_role_policy_attachment" "backup_policy" {
 }
 
 # ------------------------------
-# Application main DNS record (ALB mapping)
+# Application main DNS record (ALB mapping) – created for both new and existing ACM
 # ------------------------------
 resource "cloudflare_record" "app_domain" {
-  count = var.domain_provider == "cloudflare" && var.acm_certificate_arn == "" ? 1 : 0
+  count = var.domain_provider == "cloudflare" ? 1 : 0
 
   zone_id = var.cloudflare_zone_id
   name    = trimsuffix(var.domain_name, ".${replace(var.domain_name, "/^[^\\.]+\\./", "")}")
   type    = "CNAME"
-  value   = aws_lb.this.dns_name
+  content = aws_lb.this.dns_name
   ttl     = var.cloudflare_record_ttl
   proxied = false
 
@@ -256,9 +262,9 @@ resource "cloudflare_record" "app_domain" {
 }
 
 resource "aws_route53_record" "app_domain" {
-  count = var.domain_provider == "route53" && var.acm_certificate_arn == "" ? 1 : 0
+  count = var.domain_provider == "route53" ? 1 : 0
 
-  zone_id = data.aws_route53_zone.selected[0].zone_id
+  zone_id = local.route53_zone_id
   name    = var.domain_name
   type    = "CNAME"
   ttl     = 300
@@ -276,7 +282,7 @@ resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.this.arn
   port              = 443
   protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-2016-08"
+  ssl_policy        = var.alb_ssl_policy
   certificate_arn   = var.acm_certificate_arn != "" ? var.acm_certificate_arn : aws_acm_certificate.this[0].arn
 
   default_action {
@@ -452,16 +458,6 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
-resource "aws_iam_role_policy_attachment" "ecs_secrets_access" {
-  role       = aws_iam_role.ecs_task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
-}
-
-resource "aws_iam_role_policy_attachment" "ecs_efs_access" {
-  role       = aws_iam_role.ecs_task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonElasticFileSystemClientFullAccess"
-}
-
 resource "aws_ecs_task_definition" "vaultwarden" {
   family                   = "vaultwarden"
   network_mode             = "awsvpc"
@@ -489,7 +485,7 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.this[0].name
+          awslogs-group         = local.log_group_name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "vaultwarden-init"
         }
@@ -531,7 +527,7 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = aws_cloudwatch_log_group.this[0].name
+          awslogs-group         = local.log_group_name
           awslogs-region        = var.aws_region
           awslogs-stream-prefix = "vaultwarden"
         }
@@ -616,10 +612,14 @@ resource "aws_ecs_service" "vaultwarden" {
 
 # Output the vpc id, either created or from input
 locals {
-  vpc_id          = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
-  public_subnets  = var.create_vpc ? aws_subnet.this_public[*].id : var.public_subnet_ids
-  private_subnets = var.create_vpc ? aws_subnet.this_private[*].id : var.private_subnet_ids
-  cluster_arn     = var.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
+  vpc_id           = var.create_vpc ? aws_vpc.this[0].id : var.vpc_id
+  public_subnets   = var.create_vpc ? aws_subnet.this_public[*].id : var.public_subnet_ids
+  private_subnets  = var.create_vpc ? aws_subnet.this_private[*].id : var.private_subnet_ids
+  cluster_arn      = var.create_cluster ? aws_ecs_cluster.this[0].arn : var.cluster_arn
+  log_group_name   = var.create_cluster ? aws_cloudwatch_log_group.this[0].name : var.log_group_name
+  rds_secret_name  = coalesce(var.rds_secret_name, "${var.vpc_name}-rds-password")
+  # Route53 zone ID: explicit variable, or lookup by name when domain_provider is route53
+  route53_zone_id  = var.domain_provider != "route53" ? null : (var.route53_zone_id != null && var.route53_zone_id != "" ? var.route53_zone_id : data.aws_route53_zone.selected[0].zone_id)
 }
 
 # ------------------------------
@@ -640,26 +640,28 @@ resource "aws_db_subnet_group" "this" {
 }
 
 resource "aws_db_instance" "this" {
-  identifier              = "${var.vpc_name}-postgres"
-  engine                  = "postgres"
-  engine_version          = "18"
-  instance_class          = var.db_instance_type
-  allocated_storage       = var.db_storage_gb
-  max_allocated_storage   = var.db_max_storage_gb
-  publicly_accessible     = false
-  storage_encrypted       = true
-  deletion_protection     = true
-  multi_az                = var.db_multi_az
-  db_subnet_group_name    = aws_db_subnet_group.this.name
-  vpc_security_group_ids  = [aws_security_group.db_sg.id]
-  username                = var.db_username
-  password                = random_password.db.result
-  skip_final_snapshot     = true
+  identifier                 = "${var.vpc_name}-postgres"
+  engine                     = "postgres"
+  engine_version             = "18"
+  instance_class             = var.db_instance_type
+  allocated_storage          = var.db_storage_gb
+  max_allocated_storage      = var.db_max_storage_gb
+  publicly_accessible        = false
+  storage_encrypted          = true
+  deletion_protection        = true
+  multi_az                   = var.db_multi_az
+  db_subnet_group_name       = aws_db_subnet_group.this.name
+  vpc_security_group_ids     = [aws_security_group.db_sg.id]
+  username                   = var.db_username
+  password                   = random_password.db.result
+  skip_final_snapshot        = var.db_skip_final_snapshot
+  backup_retention_period    = var.db_backup_retention_period
+  backup_window             = var.db_backup_window
 }
 
 # Store RDS password securely in Secrets Manager
 resource "aws_secretsmanager_secret" "rds_password" {
-  name = "${var.vpc_name}-rds-password"
+  name = local.rds_secret_name
 }
 
 resource "aws_secretsmanager_secret_version" "rds_password_version" {
@@ -667,11 +669,62 @@ resource "aws_secretsmanager_secret_version" "rds_password_version" {
   secret_string = random_password.db.result
 }
 
+# Scoped IAM policies for ECS execution role (least privilege)
+resource "aws_iam_policy" "ecs_secrets" {
+  name        = "${var.vpc_name}-ecs-secrets-policy"
+  description = "Allow ECS task execution to read the RDS password secret only"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = "secretsmanager:GetSecretValue"
+      Resource = aws_secretsmanager_secret.rds_password.arn
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_policy" "ecs_efs" {
+  name        = "${var.vpc_name}-ecs-efs-policy"
+  description = "Allow ECS tasks to mount the Vaultwarden EFS file system"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["elasticfilesystem:ClientMount", "elasticfilesystem:ClientRootAccess", "elasticfilesystem:ClientWrite"]
+        Resource = aws_efs_file_system.vaultwarden.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["elasticfilesystem:DescribeFileSystems", "elasticfilesystem:DescribeMountTargets"]
+        Resource = aws_efs_file_system.vaultwarden.arn
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_secrets" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = aws_iam_policy.ecs_secrets.arn
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_efs" {
+  role       = aws_iam_role.ecs_task_execution.name
+  policy_arn = aws_iam_policy.ecs_efs.arn
+}
+
 # Generate secure random DB password
+# RDS allows only printable ASCII except '/', '@', '"', ' ' (same password used in DATABASE_URL)
 resource "random_password" "db" {
-  length  = 20
-  special = true
-  override_special = "_%@"
+  length           = 20
+  special          = true
+  override_special  = "!#$%^&*()_+-=[]{}|;:,.<>?"
 }
 
 # Dedicated security group for ECS service
@@ -728,7 +781,6 @@ resource "aws_security_group" "db_sg" {
     {
       Name        = "${var.vpc_name}-db-sg"
       Environment = var.environment
-      Terraform   = "true"
       Terraform   = "true"
     },
     var.tags

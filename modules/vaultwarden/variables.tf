@@ -60,6 +60,16 @@ variable "cluster_arn" {
   default     = null
 }
 
+variable "log_group_name" {
+  description = "Name of the existing CloudWatch log group for ECS task logs (required when create_cluster is false)"
+  type        = string
+  default     = null
+  validation {
+    condition     = var.create_cluster || var.log_group_name != null
+    error_message = "log_group_name must be set when create_cluster is false."
+  }
+}
+
 variable "cluster_name" {
   description = "Name prefix for ECS cluster to create"
   type        = string
@@ -112,6 +122,24 @@ variable "db_username" {
   default     = "vaultwarden"
 }
 
+variable "db_skip_final_snapshot" {
+  description = "Skip final RDS snapshot when the instance is destroyed (set false for production)"
+  type        = bool
+  default     = true
+}
+
+variable "db_backup_retention_period" {
+  description = "Number of days to retain RDS automated backups (0 to disable)"
+  type        = number
+  default     = 7
+}
+
+variable "db_backup_window" {
+  description = "Daily time range for RDS backups (e.g. 03:00-04:00 UTC)"
+  type        = string
+  default     = "03:00-04:00"
+}
+
 # db_password variable is no longer needed since the password is generated and stored automatically in Secrets Manager
 # Instead, users can override the secret name if desired
 variable "rds_secret_name" {
@@ -123,6 +151,18 @@ variable "rds_secret_name" {
 # ------------------------------
 # ALB and ACM Variables
 # ------------------------------
+
+variable "alb_enable_deletion_protection" {
+  description = "Enable deletion protection on the ALB (recommended true for production)"
+  type        = bool
+  default     = false
+}
+
+variable "alb_ssl_policy" {
+  description = "SSL policy for the HTTPS listener (use a modern policy e.g. ELBSecurityPolicy-TLS13-1-2-2021-06)"
+  type        = string
+  default     = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+}
 
 variable "domain_provider" {
   description = "DNS provider for domain configuration base (cloudflare or route53)"
@@ -144,6 +184,18 @@ variable "domain_name" {
   description = "Primary domain name for Vaultwarden (e.g. vaultwarden.example.com)"
   type        = string
   default     = ""
+}
+
+variable "route53_zone_id" {
+  description = "Existing Route53 hosted zone ID (optional; avoids zone lookup by name; use for multi-level TLDs e.g. example.co.uk)"
+  type        = string
+  default     = null
+}
+
+variable "route53_zone_name" {
+  description = "Route53 hosted zone name for lookup when route53_zone_id is not set (e.g. example.com or example.co.uk)"
+  type        = string
+  default     = null
 }
 
 variable "acm_certificate_arn" {
