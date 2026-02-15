@@ -157,7 +157,7 @@ variable "domain_provider" {
 variable "domain_name" {
   description = "Primary FQDN for Vaultwarden access"
   type        = string
-  default     = "new-instance-4.aioc-services.com"
+  default     = "test-vaultmin.aioc-services.com"
 }
 
 variable "route53_zone_id" {

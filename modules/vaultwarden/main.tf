@@ -471,10 +471,11 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       name      = "init-db"
       image     = "postgres:18"
       essential = false
-      command   = [
+      # Use PGPASSWORD from environment only (avoids shell syntax errors from special chars in password)
+      command = [
         "sh",
         "-c",
-        "PGPASSWORD=${random_password.db.result} psql -h ${aws_db_instance.this.address} -U ${var.db_username} -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname = 'vaultwarden';\" | grep -q 1 || psql -h ${aws_db_instance.this.address} -U ${var.db_username} -d postgres -c 'CREATE DATABASE vaultwarden;'"
+        "psql -h ${aws_db_instance.this.address} -U ${var.db_username} -d postgres -tc \"SELECT 1 FROM pg_database WHERE datname = 'vaultwarden';\" | grep -q 1 || psql -h ${aws_db_instance.this.address} -U ${var.db_username} -d postgres -c 'CREATE DATABASE vaultwarden;'"
       ]
       environment = [
         {
@@ -495,6 +496,9 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       name      = "vaultwarden"
       image     = "vaultwarden/server:${var.vaultwarden_image_tag}"
       essential = true
+      dependsOn = [
+        { containerName = "init-db", condition = "SUCCESS" }
+      ]
       portMappings = [
         {
           containerPort = 8080
